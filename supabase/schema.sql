@@ -1,164 +1,194 @@
-create extension if not exists pgcrypto;
-
-create or replace function public.set_updated_at()
-returns trigger
-language plpgsql
-set search_path = public
-as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$;
-
-create table if not exists public.users (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  email text unique not null,
-  role text not null check (role in ('Admin', 'Atendente')),
-  created_at timestamptz default now()
+-- Tabela de usuários
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('Admin', 'Atendente')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-create table if not exists public.leads (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  phone text not null unique,
-  email text,
-  city text,
-  state text,
-  country text,
-  main_pain text,
-  symptoms text,
-  age integer,
-  profession text,
-  funnel_stage text not null default 'inicio',
-  temperature text not null default 'frio' check (temperature in ('frio', 'morno', 'quente')),
-  status text not null default 'novo',
-  ai_enabled boolean default true,
-  needs_human boolean default false,
-  internal_summary text,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
+-- Tabela de leads
+CREATE TABLE leads (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  email TEXT,
+  city TEXT,
+  state TEXT,
+  country TEXT,
+  main_pain TEXT,
+  symptoms TEXT,
+  age INTEGER,
+  profession TEXT,
+  funnel_stage TEXT NOT NULL DEFAULT 'inicio',
+  temperature TEXT NOT NULL DEFAULT 'frio',
+  status TEXT NOT NULL DEFAULT 'novo',
+  ai_enabled BOOLEAN DEFAULT true,
+  needs_human BOOLEAN DEFAULT false,
+  internal_summary TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-create table if not exists public.messages (
-  id uuid primary key default gen_random_uuid(),
-  lead_id uuid references public.leads(id) on delete cascade,
-  sender_type text not null check (sender_type in ('lead', 'ai', 'human')),
-  content text not null,
-  metadata jsonb default '{}'::jsonb,
-  created_at timestamptz default now()
+-- Tabela de mensagens
+CREATE TABLE messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
+  sender_type TEXT NOT NULL CHECK (sender_type IN ('lead', 'ai', 'human')),
+  content TEXT NOT NULL,
+  metadata JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-create table if not exists public.ai_logs (
-  id uuid primary key default gen_random_uuid(),
-  lead_id uuid references public.leads(id) on delete cascade,
-  input_message text not null,
-  ai_response text not null,
-  detected_intent text,
-  detected_objection text,
-  detected_pain text,
-  suggested_funnel_stage text,
-  lead_temperature text,
-  should_escalate_to_human boolean default false,
-  escalation_reason text,
-  created_at timestamptz default now()
+-- Tabela de logs da IA
+CREATE TABLE ai_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
+  input_message TEXT NOT NULL,
+  ai_response TEXT NOT NULL,
+  detected_intent TEXT,
+  detected_objection TEXT,
+  detected_pain TEXT,
+  suggested_funnel_stage TEXT,
+  lead_temperature TEXT,
+  should_escalate_to_human BOOLEAN DEFAULT false,
+  escalation_reason TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-create table if not exists public.knowledge_base (
-  id uuid primary key default gen_random_uuid(),
-  title text not null,
-  category text not null,
-  content text not null,
-  active boolean default true,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
+-- Tabela de base de conhecimento
+CREATE TABLE knowledge_base (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title TEXT NOT NULL,
+  category TEXT NOT NULL,
+  content TEXT NOT NULL,
+  active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-create table if not exists public.objections (
-  id uuid primary key default gen_random_uuid(),
-  title text not null,
-  trigger_keywords text not null,
-  response_template text not null,
-  active boolean default true,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
+-- Tabela de objeções
+CREATE TABLE objections (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title TEXT NOT NULL,
+  trigger_keywords TEXT NOT NULL,
+  response_template TEXT NOT NULL,
+  active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-create table if not exists public.settings (
-  id uuid primary key default gen_random_uuid(),
-  key text unique not null,
-  value text not null,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
+-- Tabela de configurações
+CREATE TABLE settings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  key TEXT UNIQUE NOT NULL,
+  value TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-create index if not exists idx_leads_temperature on public.leads(temperature);
-create index if not exists idx_leads_status on public.leads(status);
-create index if not exists idx_leads_needs_human on public.leads(needs_human);
-create index if not exists idx_messages_lead_id_created_at on public.messages(lead_id, created_at);
-create index if not exists idx_ai_logs_lead_id_created_at on public.ai_logs(lead_id, created_at);
+-- Tabela de conexões WhatsApp
+CREATE TABLE whatsapp_connections (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  instance_name TEXT NOT NULL,
+  phone TEXT,
+  provider TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'disconnected',
+  qr_code TEXT,
+  api_url TEXT,
+  api_key_encrypted TEXT,
+  webhook_url TEXT,
+  last_sync_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-do $$
-begin
-  if not exists (select 1 from pg_trigger where tgname = 'set_leads_updated_at') then
-    create trigger set_leads_updated_at before update on public.leads
-    for each row execute function public.set_updated_at();
-  end if;
+-- Tabela de logs do WhatsApp
+CREATE TABLE whatsapp_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  connection_id UUID REFERENCES whatsapp_connections(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  payload JSONB,
+  status TEXT NOT NULL,
+  error_message TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-  if not exists (select 1 from pg_trigger where tgname = 'set_knowledge_base_updated_at') then
-    create trigger set_knowledge_base_updated_at before update on public.knowledge_base
-    for each row execute function public.set_updated_at();
-  end if;
+-- Tabela de configurações da IA
+CREATE TABLE ai_settings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  provider TEXT NOT NULL DEFAULT 'openai',
+  api_key_encrypted TEXT,
+  model TEXT NOT NULL DEFAULT 'gpt-4o',
+  temperature NUMERIC NOT NULL DEFAULT 0.7,
+  max_tokens INTEGER NOT NULL DEFAULT 500,
+  assistant_name TEXT NOT NULL DEFAULT 'Atendente IA',
+  global_auto_mode BOOLEAN NOT NULL DEFAULT true,
+  fallback_message TEXT NOT NULL,
+  max_auto_messages_before_handoff INTEGER NOT NULL DEFAULT 20,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-  if not exists (select 1 from pg_trigger where tgname = 'set_objections_updated_at') then
-    create trigger set_objections_updated_at before update on public.objections
-    for each row execute function public.set_updated_at();
-  end if;
+-- Tabela de treinamento da IA
+CREATE TABLE ai_training (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  section TEXT NOT NULL,
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-  if not exists (select 1 from pg_trigger where tgname = 'set_settings_updated_at') then
-    create trigger set_settings_updated_at before update on public.settings
-    for each row execute function public.set_updated_at();
-  end if;
-end;
-$$;
+-- Tabela de logs de atividade da IA (Auditoria)
+CREATE TABLE ai_activity_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
+  phone TEXT,
+  action_type TEXT NOT NULL,
+  input_message TEXT,
+  ai_response TEXT,
+  detected_intent TEXT,
+  detected_objection TEXT,
+  detected_pain TEXT,
+  funnel_stage TEXT,
+  lead_temperature TEXT,
+  confidence_score NUMERIC,
+  should_escalate_to_human BOOLEAN DEFAULT false,
+  escalation_reason TEXT,
+  model_used TEXT,
+  prompt_version TEXT,
+  tokens_used INTEGER,
+  error_message TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-insert into public.leads (name, phone, main_pain, funnel_stage, temperature, status, needs_human, internal_summary) values
-('Maria Silva', '5511999990001', 'joelho e lombar', 'dores_geral', 'morno', 'novo', false, 'Lead relata dores recorrentes e precisa entender o tratamento.'),
-('Jose Ferreira', '5511999990002', 'nervo ciatico', 'explicacao_tratamento', 'quente', 'em_atendimento', false, 'Interesse alto; pediu detalhes sobre sessoes.'),
-('Ana Costa', '5511999990003', 'artrite nas maos', 'objecao', 'morno', 'novo', true, 'Tem objecao sobre valor e precisa de atendimento humano.'),
-('Carlos Santos', '5511999990004', 'coluna e perna', 'valores', 'quente', 'negociacao', false, 'Pronto para receber proposta e proximos passos.'),
-('Lucia Almeida', '5511999990005', 'dor no corpo todo', 'inicio', 'frio', 'novo', false, 'Primeiro contato, ainda sem qualificacao completa.')
-on conflict (phone) do update set
-  main_pain = excluded.main_pain,
-  funnel_stage = excluded.funnel_stage,
-  temperature = excluded.temperature,
-  status = excluded.status,
-  needs_human = excluded.needs_human,
-  internal_summary = excluded.internal_summary;
+-- Tabela de relatórios diários
+CREATE TABLE daily_reports (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  report_date DATE UNIQUE NOT NULL,
+  total_leads INTEGER DEFAULT 0,
+  total_messages INTEGER DEFAULT 0,
+  ai_messages INTEGER DEFAULT 0,
+  human_messages INTEGER DEFAULT 0,
+  hot_leads INTEGER DEFAULT 0,
+  warm_leads INTEGER DEFAULT 0,
+  cold_leads INTEGER DEFAULT 0,
+  closed_leads INTEGER DEFAULT 0,
+  lost_leads INTEGER DEFAULT 0,
+  escalated_leads INTEGER DEFAULT 0,
+  top_pains JSONB,
+  top_objections JSONB,
+  ai_summary TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-insert into public.knowledge_base (title, category, content, active) values
-('Tom de atendimento', 'atendimento', 'Responder com linguagem simples, acolhedora e consultiva, sem prometer cura ou diagnostico definitivo.', true),
-('Escalacao humana', 'processo', 'Escalar quando houver duvida medica sensivel, pagamento, reembolso, reclamacao forte ou risco juridico.', true),
-('Qualificacao inicial', 'funil', 'Entender dor principal, tempo de dor, impacto na rotina e disponibilidade para atendimento.', true)
-on conflict do nothing;
-
-insert into public.objections (title, trigger_keywords, response_template, active) values
-('Preco', 'preco,valor,caro,custa', 'Entendo sua preocupacao com valor. Antes de falar de investimento, quero entender melhor seu caso para indicar o caminho mais adequado.', true),
-('Medo de nao funcionar', 'funciona,resultado,garantia', 'Faz sentido ter essa duvida. Nao prometemos cura, mas avaliamos seu caso com cuidado para orientar o proximo passo com seguranca.', true),
-('Tempo', 'sem tempo,agenda,horario', 'Vamos tentar encontrar um horario que encaixe melhor na sua rotina. Quais periodos costumam ser mais tranquilos para voce?', true)
-on conflict do nothing;
-
-insert into public.settings (key, value) values
-('ai_enabled', 'true'),
-('business_name', 'Atendimento IA'),
-('human_escalation_label', 'Aguardando humano')
-on conflict (key) do update set value = excluded.value;
-
-alter table public.users enable row level security;
-alter table public.leads enable row level security;
-alter table public.messages enable row level security;
-alter table public.ai_logs enable row level security;
-alter table public.knowledge_base enable row level security;
-alter table public.objections enable row level security;
-alter table public.settings enable row level security;
+-- Seeds Iniciais
+INSERT INTO leads (name, phone, main_pain, funnel_stage, temperature) VALUES
+('Maria Silva', '5511999990001', 'joelho e lombar', 'dores_geral', 'morno'),
+('José Ferreira', '5511999990002', 'nervo ciático', 'explicacao_tratamento', 'quente'),
+('Ana Costa', '5511999990003', 'artrite nas mãos', 'objecao', 'morno'),
+('Carlos Santos', '5511999990004', 'coluna e perna', 'valores', 'quente'),
+('Lucia Almeida', '5511999990005', 'dor no corpo todo', 'inicio', 'frio');
